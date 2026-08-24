@@ -5,11 +5,6 @@ from sqlalchemy import create_engine, text
 
 load_dotenv()
 
-print("ENV HOST:", os.getenv("POSTGRES_HOST"))
-print("ENV DB:", os.getenv("POSTGRES_DB"))
-print("ENV USER:", os.getenv("POSTGRES_USER"))
-print("ENV PASSWORD:", os.getenv("POSTGRES_PASSWORD"))
-
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 POSTGRES_DB = os.getenv("POSTGRES_DB")
