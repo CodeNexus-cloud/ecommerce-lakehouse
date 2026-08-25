@@ -73,58 +73,44 @@ def generate_order_record(customer_ids):
         customer_id = random.choice(customer_ids)
 
     # ---------------------------------
-    # Order date
+    # Business event date
     # ---------------------------------
 
     order_date = generate_order_date()
-
-    # ---------------------------------
-    # Status
-    # ---------------------------------
-
-    order_status = weighted_choice(
-        ORDER_STATUSES,
-        ORDER_STATUS_WEIGHTS,
-    )
-
-    # ---------------------------------
-    # Amount
-    # ---------------------------------
-
-    total_amount = round(
-        random.uniform(10, 2500),
-        2,
-    )
-
-    # ---------------------------------
-    # Shipping information
-    # ---------------------------------
-
-    shipping_city = random.choice(
-        [
-            "Nairobi",
-            "Mombasa",
-            "Kisumu",
-            "Nakuru",
-            "Eldoret",
-            "Nyeri",
-            "Thika",
-        ]
-    )
-
-    shipping_country = "Kenya"
-
-    shipping_address = (
-        f"{random.randint(1, 999)} "
-        f"{random.choice(['Main', 'Market', 'River', 'Park', 'Station'])} "
-        f"Road"
-    )
 
     # ---------------------------------
     # Created timestamp
     # ---------------------------------
 
     created_at = order_date
+
+    # ---------------------------------
+    # Late-arriving data
+    # ---------------------------------
+
+    # The business event occurred earlier,
+    # but the source record was created later.
+    if random_bool(ORDER_LATE_ARRIVAL_RATE):
+
+        max_creation_date = datetime.fromisoformat(
+            ORDER_END_DATE
+        )
+
+        if created_at < max_creation_date:
+
+            late_arrival_days = random.randint(1, 5)
+
+            late_created_at = (
+                created_at
+                + timedelta(days=late_arrival_days)
+            )
+
+            # Never allow created_at beyond
+            # the simulated source-system end date.
+            created_at = min(
+                late_created_at,
+                max_creation_date,
+            )
 
     # ---------------------------------
     # Updated timestamp
@@ -150,18 +136,38 @@ def generate_order_record(customer_ids):
         updated_at = created_at
 
     # ---------------------------------
-    # Late-arriving data
+    # Other order attributes
     # ---------------------------------
 
-    # The business event occurred earlier,
-    # but the record is considered to have
-    # arrived later in the operational system.
+    order_status = weighted_choice(
+        ORDER_STATUSES,
+        ORDER_STATUS_WEIGHTS,
+    )
 
-    if random_bool(ORDER_LATE_ARRIVAL_RATE):
+    total_amount = round(
+        random.uniform(10, 2500),
+        2,
+    )
 
-        created_at = created_at + timedelta(
-            days=random.randint(1, 5)
-        )
+    shipping_city = random.choice(
+        [
+            "Nairobi",
+            "Mombasa",
+            "Kisumu",
+            "Nakuru",
+            "Eldoret",
+            "Nyeri",
+            "Thika",
+        ]
+    )
+
+    shipping_country = "Kenya"
+
+    shipping_address = (
+        f"{random.randint(1, 999)} "
+        f"{random.choice(['Main', 'Market', 'River', 'Park', 'Station'])} "
+        f"Road"
+    )
 
     return {
         "customer_id": customer_id,

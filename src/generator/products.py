@@ -2,7 +2,11 @@ import random
 
 from sqlalchemy import text
 
-from src.generator.config import DEV_PRODUCTS
+from src.generator.config import (
+    LARGE_PRODUCTS,
+    DEV_PRODUCTS,
+    DATASET_SIZE,
+)
 from src.generator.utils import create_database_engine, fake
 
 
@@ -38,7 +42,15 @@ PRODUCT_NOUNS = [
 ]
 
 
-def generate_products(count: int = DEV_PRODUCTS):
+def generate_products(count=None):
+
+    if count is None:
+
+        count = (
+            LARGE_PRODUCTS
+            if DATASET_SIZE == "large"
+            else DEV_PRODUCTS
+        )
     """
     Generate products using existing categories.
     """
@@ -46,9 +58,7 @@ def generate_products(count: int = DEV_PRODUCTS):
     engine = create_database_engine()
 
     with engine.connect() as connection:
-        category_ids = [
-            row[0]
-            for row in connection.execute(
+        category_ids = [ row[0] for row in connection.execute(
                 text(
                     """
                     SELECT category_id

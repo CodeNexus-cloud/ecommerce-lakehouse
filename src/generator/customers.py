@@ -13,6 +13,7 @@ from src.generator.config import (
     CUSTOMER_START_DATE,
     CUSTOMER_WHITESPACE_ERROR_RATE,
     DEV_CUSTOMERS,
+
 )
 from src.generator.utils import (
     create_database_engine,
@@ -20,6 +21,14 @@ from src.generator.utils import (
     initialize_random_seed,
     random_bool,
     random_datetime,
+)
+from sqlalchemy import text
+
+from src.generator.config import (
+    BATCH_SIZE,
+    DATASET_SIZE,
+    DEV_CUSTOMERS,
+    LARGE_CUSTOMERS,
 )
 
 
@@ -175,35 +184,18 @@ def generate_customer_record(
     }
 
 
-def generate_customers(count: int = DEV_CUSTOMERS):
+def generate_customers(count=None):
 
     initialize_random_seed(42)
 
-    engine = create_database_engine()
-
-    records = []
-
-    # Generate the normal customer population
-    for _ in range(count):
-
-        record = generate_customer_record()
-
-        records.append(record)
-
-    # Create duplicates from existing customers
-    duplicate_count = int(
-        count * CUSTOMER_DUPLICATE_RATE
-    )
-
-    for _ in range(duplicate_count):
-
-        source_customer = random.choice(records)
-
-        duplicate = generate_customer_record(
-            duplicate_source=source_customer
+    if count is None:
+        count = (
+            LARGE_CUSTOMERS
+            if DATASET_SIZE == "large"
+            else DEV_CUSTOMERS
         )
 
-        records.append(duplicate)
+    engine = create_database_engine()
 
     insert_sql = text(
         """
@@ -236,17 +228,95 @@ def generate_customers(count: int = DEV_CUSTOMERS):
         """
     )
 
-    with engine.begin() as connection:
-        connection.execute(
-            insert_sql,
-            records,
-        )
+    total_inserted = 0
 
-    print(
-        f"Inserted {len(records):,} customers "
-        f"({duplicate_count:,} duplicates)."
+    with engine.begin() as connection:
+
+        batch = []
+
+        for _ in range(count):
+
+            batch.append(
+                generate_customer_record()
+            )
+
+            if len(batch) >= BATCH_SIZE:
+
+                connection.execute(
+                    insert_sql,
+                    batch,
+                )
+
+                total_inserted += len(batch)
+
+                print(
+                    f"Inserted customers: "
+                    f"{total_inserted:,}/{count:,}"
+                )
+
+                batch.clear()
+
+        # Remaining records
+        if batch:
+
+            connection.execute(
+                insert_sql,
+                batch,
+            )
+
+            total_inserted += len(batch)
+
+    # -----------------------------------------
+    # Duplicate customers
+    # -----------------------------------------
+
+    duplicate_count = int(
+        count * CUSTOMER_DUPLICATE_RATE
     )
 
+    with engine.begin() as connection:
+
+        source_customers = connection.execute(
+            text(
+                """
+                SELECT
+                    first_name,
+                    last_name,
+                    email,
+                    phone,
+                    date_of_birth,
+                    gender,
+                    city,
+                    country,
+                    customer_status,
+                    created_at,
+                    updated_at
+                FROM customers
+                ORDER BY RANDOM()
+                LIMIT :duplicate_count
+                """
+            ),
+            {
+                "duplicate_count": duplicate_count
+            },
+        ).mappings().all()
+
+        duplicate_records = [
+            dict(customer)
+            for customer in source_customers
+        ]
+
+        connection.execute(
+            insert_sql,
+            duplicate_records,
+        )
+
+    total_inserted += duplicate_count
+
+    print(
+        f"Inserted {total_inserted:,} customers "
+        f"including {duplicate_count:,} duplicates."
+    )
 
 if __name__ == "__main__":
     generate_customers()

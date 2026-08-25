@@ -62,3 +62,79 @@ ORDER_DUPLICATE_RATE = 0.01
 ORDER_MISSING_CUSTOMER_RATE = 0.005
 ORDER_LATE_ARRIVAL_RATE = 0.01
 ORDER_UPDATED_RATE = 0.05
+
+
+# order items
+MIN_ITEMS_PER_ORDER = 1
+MAX_ITEMS_PER_ORDER = 5
+
+ORDER_ITEM_INVALID_QUANTITY_RATE = 0.01
+ORDER_ITEM_DUPLICATE_RATE = 0.005
+
+
+# Payments
+
+PAYMENT_DUPLICATE_RATE = 0.01
+PAYMENT_MISSING_REFERENCE_RATE = 0.02
+PAYMENT_AMOUNT_MISMATCH_RATE = 0.01
+PAYMENT_NO_PAYMENT_RATE = 0.02
+
+
+# Returns
+
+RETURN_RATE = 0.08
+
+RETURN_INVALID_QUANTITY_RATE = 0.01
+
+RETURN_DUPLICATE_RATE = 0.005
+
+MAX_RETURN_DAYS_AFTER_ORDER = 60
+
+# ==========================================
+# DEVELOPMENT DATASET
+# ==========================================
+
+DEV_CATEGORIES = 20
+DEV_PRODUCTS = 100
+DEV_CUSTOMERS = 1_000
+DEV_ORDERS = 10_000
+
+
+# ==========================================
+# LARGE DATASET
+# ==========================================
+
+LARGE_CATEGORIES = 20
+LARGE_PRODUCTS = 5_000
+LARGE_CUSTOMERS = 100_000
+LARGE_ORDERS = 2_000_000
+
+
+# ==========================================
+# GENERATION
+# ==========================================
+
+BATCH_SIZE = 10_000
+
+DATASET_SIZE = "large"
+
+def get_dataset_config():
+    if DATASET_SIZE == "dev":
+        return {
+            "categories": DEV_CATEGORIES,
+            "products": DEV_PRODUCTS,
+            "customers": DEV_CUSTOMERS,
+            "orders": DEV_ORDERS,
+        }
+
+    if DATASET_SIZE == "large":
+        return {
+            "categories": LARGE_CATEGORIES,
+            "products": LARGE_PRODUCTS,
+            "customers": LARGE_CUSTOMERS,
+            "orders": LARGE_ORDERS,
+        }
+
+    raise ValueError(
+        f"Unknown DATASET_SIZE: {DATASET_SIZE}"
+    )
