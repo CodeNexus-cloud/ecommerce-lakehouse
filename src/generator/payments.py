@@ -1,36 +1,33 @@
 import random
-import uuid
-from datetime import timedelta
 
 from sqlalchemy import text
 
 from src.generator.config import (
-    PAYMENT_AMOUNT_MISMATCH_RATE,
-    PAYMENT_DUPLICATE_RATE,
-    PAYMENT_MISSING_REFERENCE_RATE,
-    PAYMENT_NO_PAYMENT_RATE,
+    BATCH_SIZE,
+    DATASET_SIZE,
+    DEV_ORDERS,
+    LARGE_ORDERS,
 )
 from src.generator.utils import (
     create_database_engine,
     initialize_random_seed,
-    random_bool,
-    random_datetime,
     weighted_choice,
 )
 
 
 PAYMENT_METHODS = [
     "CARD",
-    "PAYPAL",
-    "BANK_TRANSFER",
     "MOBILE_MONEY",
+    "BANK_TRANSFER",
+    "CASH",
 ]
 
+
 PAYMENT_METHOD_WEIGHTS = [
-    50,
-    20,
-    10,
-    20,
+    45,
+    35,
+    15,
+    5,
 ]
 
 
@@ -38,179 +35,180 @@ PAYMENT_STATUSES = [
     "SUCCESS",
     "FAILED",
     "PENDING",
-    "REFUNDED",
 ]
 
+
 PAYMENT_STATUS_WEIGHTS = [
-    85,
+    90,
     7,
-    5,
     3,
 ]
 
 
-def generate_transaction_reference():
+def get_order_count():
+    """Return expected order count for selected dataset."""
+
+    if DATASET_SIZE == "dev":
+        return DEV_ORDERS
+
+    if DATASET_SIZE == "large":
+        return LARGE_ORDERS
+
+    raise ValueError(
+        f"Unknown DATASET_SIZE: {DATASET_SIZE}"
+    )
+
+
+def generate_payment_record(order):
     """
-    Generate a unique-looking payment transaction reference.
+    Generate a payment for an order.
+
+    The payment amount comes directly from
+    orders.total_amount.
     """
 
-    return f"TXN-{uuid.uuid4().hex[:16].upper()}"
+    order_id = order["order_id"]
+    order_total = float(
+        order["total_amount"] or 0
+    )
+
+    payment_status = weighted_choice(
+        PAYMENT_STATUSES,
+        PAYMENT_STATUS_WEIGHTS,
+    )
+
+    # Successful payments normally cover
+    # the order amount.
+    if payment_status == "SUCCESS":
+
+        amount = order_total
+
+    elif payment_status == "FAILED":
+
+        # Failed payment may be for the full
+        # amount or a partial attempted amount.
+        amount = round(
+            order_total * random.uniform(
+                0.1,
+                1.0,
+            ),
+            2,
+        )
+
+    else:
+
+        amount = order_total
+
+    return {
+        "order_id": order_id,
+        "payment_method": weighted_choice(
+            PAYMENT_METHODS,
+            PAYMENT_METHOD_WEIGHTS,
+        ),
+        "payment_status": payment_status,
+        "amount": amount,
+    }
 
 
 def generate_payments():
 
-    initialize_random_seed(44)
+    initialize_random_seed(45)
 
     engine = create_database_engine()
-
-    # -----------------------------------------
-    # Load orders
-    # -----------------------------------------
-
-    with engine.connect() as connection:
-
-        orders = [
-            {
-                "order_id": row[0],
-                "order_date": row[1],
-                "total_amount": float(row[2]),
-            }
-            for row in connection.execute(
-                text(
-                    """
-                    SELECT
-                        order_id,
-                        order_date,
-                        total_amount
-                    FROM orders
-                    """
-                )
-            )
-        ]
-
-    if not orders:
-        raise RuntimeError(
-            "No orders found. Generate orders first."
-        )
-
-    records = []
-
-    # -----------------------------------------
-    # Generate payments
-    # -----------------------------------------
-
-    for order in orders:
-
-        # Some orders intentionally have no payment
-        if random_bool(PAYMENT_NO_PAYMENT_RATE):
-            continue
-
-        payment_status = weighted_choice(
-            PAYMENT_STATUSES,
-            PAYMENT_STATUS_WEIGHTS,
-        )
-
-        payment_method = weighted_choice(
-            PAYMENT_METHODS,
-            PAYMENT_METHOD_WEIGHTS,
-        )
-
-        # Payment normally equals order total
-        amount = order["total_amount"]
-
-        # Introduce amount mismatches
-        if random_bool(PAYMENT_AMOUNT_MISMATCH_RATE):
-
-            adjustment = random.choice(
-                [
-                    -10,
-                    -20,
-                    -50,
-                    10,
-                    20,
-                    50,
-                ]
-            )
-
-            amount = round(
-                max(0, amount + adjustment),
-                2,
-            )
-
-        payment_date = order["order_date"] + timedelta(
-            hours=random.randint(1, 72)
-        )
-
-        transaction_reference = (
-            generate_transaction_reference()
-        )
-
-        # Missing transaction reference
-        if random_bool(
-            PAYMENT_MISSING_REFERENCE_RATE
-        ):
-            transaction_reference = None
-
-        records.append(
-            {
-                "order_id": order["order_id"],
-                "payment_date": payment_date,
-                "payment_method": payment_method,
-                "payment_status": payment_status,
-                "amount": amount,
-                "transaction_reference": transaction_reference,
-            }
-        )
-
-    # -----------------------------------------
-    # Duplicate payment records
-    # -----------------------------------------
-
-    duplicate_count = int(
-        len(records) * PAYMENT_DUPLICATE_RATE
-    )
-
-    for _ in range(duplicate_count):
-
-        duplicate = random.choice(records).copy()
-
-        records.append(duplicate)
-
-    # -----------------------------------------
-    # Insert
-    # -----------------------------------------
 
     insert_sql = text(
         """
         INSERT INTO payments (
             order_id,
-            payment_date,
             payment_method,
             payment_status,
-            amount,
-            transaction_reference
+            amount
         )
         VALUES (
             :order_id,
-            :payment_date,
             :payment_method,
             :payment_status,
-            :amount,
-            :transaction_reference
+            :amount
         )
         """
     )
 
     with engine.begin() as connection:
 
-        connection.execute(
-            insert_sql,
-            records,
-        )
+        last_order_id = 0
 
+        total_orders_processed = 0
+        total_payments_inserted = 0
+
+        while True:
+
+            orders = connection.execute(
+                text(
+                    """
+                    SELECT
+                        order_id,
+                        total_amount
+                    FROM orders
+                    WHERE order_id > :last_order_id
+                    ORDER BY order_id
+                    LIMIT :batch_size
+                    """
+                ),
+                {
+                    "last_order_id": last_order_id,
+                    "batch_size": BATCH_SIZE,
+                },
+            ).mappings().all()
+
+            if not orders:
+                break
+
+            payment_batch = []
+
+            for order in orders:
+
+                payment = generate_payment_record(
+                    order
+                )
+
+                payment_batch.append(payment)
+
+            connection.execute(
+                insert_sql,
+                payment_batch,
+            )
+
+            total_orders_processed += len(
+                orders
+            )
+
+            total_payments_inserted += len(
+                payment_batch
+            )
+
+            last_order_id = orders[-1][
+                "order_id"
+            ]
+
+            print(
+                f"Processed orders: "
+                f"{total_orders_processed:,}/"
+                f"{get_order_count():,} | "
+                f"Payments: "
+                f"{total_payments_inserted:,}"
+            )
+
+    print()
+    print("=" * 70)
+    print("PAYMENT GENERATION COMPLETE")
+    print("=" * 70)
     print(
-        f"Inserted {len(records):,} payments "
-        f"({duplicate_count:,} duplicate records)."
+        f"Orders processed: "
+        f"{total_orders_processed:,}"
+    )
+    print(
+        f"Payments inserted: "
+        f"{total_payments_inserted:,}"
     )
 
 

@@ -1,242 +1,190 @@
 import random
-from datetime import timedelta
 
 from sqlalchemy import text
 
-
 from src.generator.config import (
-    MAX_RETURN_DAYS_AFTER_ORDER,
-    RETURN_DUPLICATE_RATE,
-    RETURN_INVALID_QUANTITY_RATE,
+    BATCH_SIZE,
+    DATASET_SIZE,
+    DEV_ORDERS,
+    LARGE_ORDERS,
     RETURN_RATE,
 )
-
-
 from src.generator.utils import (
     create_database_engine,
     initialize_random_seed,
-    random_bool,
-    weighted_choice,
 )
 
 
 RETURN_REASONS = [
     "DAMAGED",
-    "DEFECTIVE",
     "WRONG_ITEM",
     "NOT_AS_DESCRIBED",
     "CHANGED_MIND",
     "SIZE_ISSUE",
-]
-
-RETURN_REASON_WEIGHTS = [
-    15,
-    15,
-    10,
-    15,
-    30,
-    15,
+    "QUALITY_ISSUE",
 ]
 
 
 RETURN_STATUSES = [
     "REQUESTED",
     "APPROVED",
+    "RECEIVED",
+    "REFUNDED",
     "REJECTED",
-    "COMPLETED",
 ]
 
-RETURN_STATUS_WEIGHTS = [
-    10,
-    15,
-    5,
-    70,
-]
+
+def get_order_count():
+    """Return expected order count for selected dataset."""
+
+    if DATASET_SIZE == "dev":
+        return DEV_ORDERS
+
+    if DATASET_SIZE == "large":
+        return LARGE_ORDERS
+
+    raise ValueError(
+        f"Unknown DATASET_SIZE: {DATASET_SIZE}"
+    )
+
+
+def generate_return_record(order):
+
+    order_id = order["order_id"]
+    order_total = float(
+        order["total_amount"] or 0
+    )
+
+    return_amount = round(
+        order_total
+        * random.uniform(
+            0.1,
+            1.0,
+        ),
+        2,
+    )
+
+    return {
+        "order_id": order_id,
+        "return_reason": random.choice(
+            RETURN_REASONS
+        ),
+        "return_status": random.choice(
+            RETURN_STATUSES
+        ),
+        "refund_amount": return_amount,
+    }
 
 
 def generate_returns():
-    """
-    Generate return records for existing order items.
-    """
 
-    initialize_random_seed(45)
+    initialize_random_seed(46)
 
     engine = create_database_engine()
 
-    # -----------------------------------------
-    # Load order items with order information
-    # -----------------------------------------
-
-    with engine.connect() as connection:
-
-        order_items = [
-            {
-                "order_item_id": row[0],
-                "order_id": row[1],
-                "quantity": row[2],
-                "unit_price": float(row[3]),
-                "order_date": row[4],
-                "order_status": row[5],
-            }
-            for row in connection.execute(
-                text(
-                    """
-                    SELECT
-                        oi.order_item_id,
-                        oi.order_id,
-                        oi.quantity,
-                        oi.unit_price,
-                        o.order_date,
-                        o.order_status
-                    FROM order_items oi
-                    INNER JOIN orders o
-                        ON oi.order_id = o.order_id
-                    """
-                )
-            )
-        ]
-
-    if not order_items:
-        raise RuntimeError(
-            "No order items found. "
-            "Generate order items first."
-        )
-
-    records = []
-
-    # -----------------------------------------
-    # Generate returns
-    # -----------------------------------------
-
-    for item in order_items:
-
-        # Don't normally allow returns for
-        # cancelled orders.
-        if item["order_status"] == "CANCELLED":
-            continue
-
-        # Invalid/zero quantities already represent
-        # bad source records, so skip them here.
-        if item["quantity"] <= 0:
-            continue
-
-        # Only some order items are returned.
-        if not random_bool(RETURN_RATE):
-            continue
-
-        # Return quantity cannot normally exceed
-        # the purchased quantity.
-        return_quantity = random.randint(
-            1,
-            item["quantity"],
-        )
-
-        # Intentionally introduce invalid returns.
-        if random_bool(
-            RETURN_INVALID_QUANTITY_RATE
-        ):
-            return_quantity = random.choice(
-                [
-                    0,
-                    -1,
-                    item["quantity"] + 1,
-                ]
-            )
-
-        return_status = weighted_choice(
-            RETURN_STATUSES,
-            RETURN_STATUS_WEIGHTS,
-        )
-
-        return_reason = weighted_choice(
-            RETURN_REASONS,
-            RETURN_REASON_WEIGHTS,
-        )
-
-        return_date = (
-            item["order_date"]
-            + timedelta(
-                days=random.randint(
-                    1,
-                    MAX_RETURN_DAYS_AFTER_ORDER,
-                )
-            )
-        )
-
-        # Refund amount is normally based on
-        # quantity returned and item unit price.
-        refund_amount = round(
-            return_quantity * item["unit_price"],
-            2,
-        )
-
-        # A rejected/requested return may not
-        # actually have a completed refund.
-        if return_status in ["REQUESTED", "REJECTED"]:
-            refund_amount = 0
-
-        records.append(
-            {
-                "order_item_id": item["order_item_id"],
-                "return_date": return_date,
-                "return_reason": return_reason,
-                "return_status": return_status,
-                "return_quantity": return_quantity,
-                "refund_amount": refund_amount,
-            }
-        )
-
-    # -----------------------------------------
-    # Introduce duplicate return records
-    # -----------------------------------------
-
-    duplicate_count = int(
-        len(records) * RETURN_DUPLICATE_RATE
-    )
-
-    for _ in range(duplicate_count):
-
-        duplicate = random.choice(
-            records
-        ).copy()
-
-        records.append(duplicate)
-
-    # -----------------------------------------
-    # Insert records
-    # -----------------------------------------
-
     insert_sql = text(
         """
-            INSERT INTO returns (
-                order_item_id,
-                return_date,
-                return_reason,
-                return_status,
-                quantity,
-                refund_amount
-            )
-            VALUES (
-                :order_item_id,
-                :return_date,
-                :return_reason,
-                :return_status,
-                :return_quantity,
-                :refund_amount
-            )
+        INSERT INTO returns (
+            order_id,
+            return_reason,
+            return_status,
+            refund_amount
+        )
+        VALUES (
+            :order_id,
+            :return_reason,
+            :return_status,
+            :refund_amount
+        )
         """
     )
 
     with engine.begin() as connection:
 
-        connection.execute(
-            insert_sql,
-            records,
-        )
+        last_order_id = 0
 
+        total_orders_processed = 0
+        total_returns_inserted = 0
+
+        while True:
+
+            orders = connection.execute(
+                text(
+                    """
+                    SELECT
+                        order_id,
+                        total_amount
+                    FROM orders
+                    WHERE order_id > :last_order_id
+                    ORDER BY order_id
+                    LIMIT :batch_size
+                    """
+                ),
+                {
+                    "last_order_id": last_order_id,
+                    "batch_size": BATCH_SIZE,
+                },
+            ).mappings().all()
+
+            if not orders:
+                break
+
+            return_batch = []
+
+            for order in orders:
+
+                # Not every order is returned.
+                if random.random() > RETURN_RATE:
+                    continue
+
+                return_record = (
+                    generate_return_record(
+                        order
+                    )
+                )
+
+                return_batch.append(
+                    return_record
+                )
+
+            if return_batch:
+
+                connection.execute(
+                    insert_sql,
+                    return_batch,
+                )
+
+                total_returns_inserted += len(
+                    return_batch
+                )
+
+            total_orders_processed += len(
+                orders
+            )
+
+            last_order_id = orders[-1][
+                "order_id"
+            ]
+
+            print(
+                f"Processed orders: "
+                f"{total_orders_processed:,}/"
+                f"{get_order_count():,} | "
+                f"Returns: "
+                f"{total_returns_inserted:,}"
+            )
+
+    print()
+    print("=" * 70)
+    print("RETURN GENERATION COMPLETE")
+    print("=" * 70)
     print(
-        f"Inserted {len(records):,} returns "
-        f"({duplicate_count:,} duplicate records)."
+        f"Orders processed: "
+        f"{total_orders_processed:,}"
+    )
+    print(
+        f"Returns inserted: "
+        f"{total_returns_inserted:,}"
     )
 
 
