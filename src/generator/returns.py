@@ -49,30 +49,76 @@ def get_order_count():
 
 
 def generate_return_record(order):
+    """
+    Generate one return record for a specific order item.
+    """
 
     order_id = order["order_id"]
-    order_total = float(
-        order["total_amount"] or 0
+    order_item_id = order["order_item_id"]
+
+    item_quantity = int(
+        order["item_quantity"] or 0
     )
 
-    return_amount = round(
-        order_total
-        * random.uniform(
-            0.1,
-            1.0,
-        ),
+    unit_price = float(
+        order["unit_price"] or 0
+    )
+
+    discount_amount = float(
+        order["discount_amount"] or 0
+    )
+
+    # Safety check
+    if item_quantity <= 0:
+        return None
+
+    # A return cannot exceed the quantity purchased
+    return_quantity = random.randint(
+        1,
+        item_quantity,
+    )
+
+    # Allocate discount proportionally to the returned quantity
+    discount_per_unit = (
+        discount_amount / item_quantity
+        if item_quantity > 0
+        else 0
+    )
+
+    refund_amount = round(
+        (
+            unit_price
+            - discount_per_unit
+        )
+        * return_quantity,
         2,
+    )
+
+    # Return date occurs after the order date
+    order_date = order["order_date"]
+
+    return_date = (
+        order_date
+        + __import__("datetime").timedelta(
+            days=random.randint(1, 30)
+        )
     )
 
     return {
         "order_id": order_id,
+        "order_item_id": order_item_id,
+        "return_date": return_date,
         "return_reason": random.choice(
             RETURN_REASONS
+        ),
+        "quantity": return_quantity,
+        "refund_amount": max(
+            refund_amount,
+            0,
         ),
         "return_status": random.choice(
             RETURN_STATUSES
         ),
-        "refund_amount": return_amount,
     }
 
 
@@ -86,15 +132,21 @@ def generate_returns():
         """
         INSERT INTO returns (
             order_id,
+            order_item_id,
+            return_date,
             return_reason,
-            return_status,
-            refund_amount
+            quantity,
+            refund_amount,
+            return_status
         )
         VALUES (
             :order_id,
+            :order_item_id,
+            :return_date,
             :return_reason,
-            :return_status,
-            :refund_amount
+            :quantity,
+            :refund_amount,
+            :return_status
         )
         """
     )
@@ -105,6 +157,7 @@ def generate_returns():
 
         total_orders_processed = 0
         total_returns_inserted = 0
+        total_returns_skipped = 0
 
         while True:
 
@@ -112,11 +165,37 @@ def generate_returns():
                 text(
                     """
                     SELECT
-                        order_id,
-                        total_amount
-                    FROM orders
-                    WHERE order_id > :last_order_id
-                    ORDER BY order_id
+                        o.order_id,
+                        o.total_amount,
+                        o.order_date,
+                        oi.order_item_id,
+                        oi.quantity AS item_quantity,
+                        oi.unit_price,
+                        oi.discount_amount
+
+                    FROM orders o
+
+                    JOIN LATERAL (
+                        SELECT
+                            order_item_id,
+                            quantity,
+                            unit_price,
+                            discount_amount
+
+                        FROM order_items oi
+
+                        WHERE oi.order_id = o.order_id
+
+                        ORDER BY random()
+
+                        LIMIT 1
+
+                    ) oi ON TRUE
+
+                    WHERE o.order_id > :last_order_id
+
+                    ORDER BY o.order_id
+
                     LIMIT :batch_size
                     """
                 ),
@@ -137,11 +216,15 @@ def generate_returns():
                 if random.random() > RETURN_RATE:
                     continue
 
-                return_record = (
-                    generate_return_record(
-                        order
-                    )
+                return_record = generate_return_record(
+                    order
                 )
+
+                if return_record is None:
+
+                    total_returns_skipped += 1
+
+                    continue
 
                 return_batch.append(
                     return_record
@@ -178,13 +261,20 @@ def generate_returns():
     print("=" * 70)
     print("RETURN GENERATION COMPLETE")
     print("=" * 70)
+
     print(
         f"Orders processed: "
         f"{total_orders_processed:,}"
     )
+
     print(
         f"Returns inserted: "
         f"{total_returns_inserted:,}"
+    )
+
+    print(
+        f"Returns skipped: "
+        f"{total_returns_skipped:,}"
     )
 
 
