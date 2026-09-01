@@ -1,0 +1,148 @@
+-- ============================================================
+-- SILVER LAYER
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS YOUR_CATALOG.silver;
+
+
+-- ============================================================
+-- CATEGORIES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.categories (
+
+    category_id BIGINT NOT NULL,
+    category_name STRING,
+    description STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- CUSTOMERS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.customers (
+
+    customer_id BIGINT NOT NULL,
+    first_name STRING,
+    last_name STRING,
+    email_address STRING,
+    phone_number STRING,
+    date_of_birth DATE,
+    gender STRING,
+    city STRING,
+    country STRING,
+    customer_status STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- PRODUCTS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.products (
+
+    product_id BIGINT NOT NULL,
+    category_id BIGINT NOT NULL,
+    product_name STRING NOT NULL,
+    product_sku STRING,
+    description STRING,
+    unit_price DECIMAL(25,2) NOT NULL,
+    cost_price DECIMAL(25,2) NOT NULL,
+    product_status STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- ORDERS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.orders (
+
+    order_id BIGINT NOT NULL,
+    customer_id BIGINT,
+    order_date TIMESTAMP NOT NULL,
+    order_status STRING,
+    currency STRING,
+    shipping_address STRING,
+    shipping_city STRING,
+    shipping_country STRING,
+    total_amount DECIMAL(25,2),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- ORDER ITEMS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.order_items (
+
+    order_item_id BIGINT NOT NULL,
+    order_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(25,2) NOT NULL,
+    discount_amount DECIMAL(25,2),
+    line_total DECIMAL(25,2),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- PAYMENTS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.payments (
+
+    payment_id BIGINT NOT NULL,
+    order_id BIGINT NOT NULL,
+    amount DECIMAL(25,2) NOT NULL,
+    transaction_reference STRING,
+    payment_date TIMESTAMP,
+    payment_method STRING,
+    payment_status STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
+
+
+-- ============================================================
+-- RETURNS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS YOUR_CATALOG.silver.returns (
+
+    return_id BIGINT NOT NULL,
+    order_id BIGINT NOT NULL,
+    order_item_id BIGINT NOT NULL,
+    return_date TIMESTAMP,
+    return_reason STRING,
+    quantity INT,
+    refund_amount DECIMAL(25,2),
+    return_status STRING,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+
+)
+USING DELTA;
